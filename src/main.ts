@@ -1,6 +1,7 @@
 import './style.css'
 import girlNames from './girlnames.json'
 import boyNames from './boynames.json';
+import { GameState, Person } from './types';
 // invent money/ banks
 // get invaded, people taken, killed, maimed, 
 // start with two foods: carrots, tea
@@ -8,6 +9,7 @@ import boyNames from './boynames.json';
 // jobs
 // childcare
 // what needs does the island have e.g. childcare, food variation
+let Debug = true;
 const girlNamesLength = girlNames.names.length;
 const boyNamesLength = boyNames.names.length;
 function getRandomNumber(from: number, to: number) {
@@ -23,42 +25,7 @@ function getRandomGirlName() {
   return girlNames.names[i];
 }
 
-
-interface Person {
-  id: number
-  name: string
-  age: number
-  partner?: number
-  gender: 'male' | 'female'
-  children: Person[]
-  mother?: number
-  father?: number
-  dead?: boolean
-}
-interface News {
-  title: string
-  body: string
-}
-interface IslandAction {
-  title: string
-  description: string
-  
-}
-interface GameState {
-  year: number
-  people: Person[]
-  food: number
-  news: News[]
-  islandEvents: IslandEvent[]
-  islandActions: IslandAction[]
-}
-interface IslandEvent {
-  title: string
-  description: string
-  choices: string[]
-}
-
-const gameState: GameState = {
+const State: GameState = {
   year: 0,
   food: 10000,
   people: [
@@ -67,7 +34,6 @@ const gameState: GameState = {
       name: getRandomBoyName(),
       gender: 'male',
       age: 18,
-      partner: 2,
       children: []
     },
     {
@@ -75,7 +41,6 @@ const gameState: GameState = {
       name: getRandomGirlName(),
       gender: 'female',
       age: 18,
-      partner: 1,
       children: []
     }
   ],
@@ -83,77 +48,174 @@ const gameState: GameState = {
   islandEvents: [],
   islandActions: []
 };
+State.people[0].partner = State.people[1];
+State.people[1].partner = State.people[0];
 
-function next(state: GameState) {
-  state.year++;
-  state.news = [];
-  const deceased: Person[] = [];
-  state.people.forEach(p => {
-    p.age++;
-    state.food--;
-    if (p.gender == 'female' && !p.dead) {
-      const withinChildbearingAge = p.age > 14 && p.age < 45;
-      if (withinChildbearingAge && p.partner) {
-        const partner = state.people.find(x => x.id == p.partner);
-        if (partner?.gender == 'male' && !partner.dead && partner?.age >= 14) {
-          const rand = getRandomNumber(0, 100);
-          if (rand < 20) {
-            const gender: 'male' | 'female' = getRandomNumber(0, 100) > 50 ? 'male' : 'female';
-            const name = gender == 'male' ? getRandomBoyName() : getRandomGirlName()
-            state.people.push({
-              id: state.people.length + 1,
-              name,
-              age: 0,
-              gender,
-              children: [],
-              mother: p.id,
-              father: partner.id
-            });
-          }
+
+function doPartnerMatching(state: GameState) {
+  const partnerFindingChancePercentage = 40;
+  const partnerFindingAgeMinimum = 14;
+  const acceptablePartnerAgeGap = 30;
+
+  const males = state.people.filter(p => p.gender == 'male' && !p.partner && p.age >= partnerFindingAgeMinimum);
+  const females = state.people.filter(p => p.gender == 'female' && !p.partner && p.age >= partnerFindingAgeMinimum);
+  const shouldLoopOverMales = males > females;
+  const genderToLoopOver = shouldLoopOverMales ? males : females;
+  const candidates = shouldLoopOverMales ? females : males;
+  for (let i = 0; i < genderToLoopOver.length; i++) {
+    const rand = getRandomNumber(0, 100);
+    if (rand <= partnerFindingChancePercentage) {
+      if (candidates.length) {
+        const index = getRandomNumber(0, candidates.length - 1);
+        if (!candidates[index].partner) {
+          genderToLoopOver[i].partner = candidates[index];
+          candidates[index].partner = genderToLoopOver[i];
         }
       }
     }
-    const died = getRandomNumber(0, 200 - p.age) < 2;
-    if (died) {
-      deceased.push(p);
-      p.dead = true;
+  }
+}
+
+function doDeath(state: GameState): Person[] {
+  const result: Person[] = [];
+  for (let i = 0; i < state.people.length; i++) {
+    const p = state.people[i];
+    if (p.age < 14) {
+      continue;
     }
-  });
+    const upperLimit = p.age < 120 ? 200 : 130;
+    const died = getRandomNumber(0, upperLimit - p.age) < 1;
+    if (died) {
+      p.partner = undefined;
+      result.push(p);
+      p.dead = true;
+      // delete state.people[i];
+    }
+
+  }
+  return result;
+}
+
+function makeBabies(state: GameState) {
+  const peopleLength = state.people.length;
+  const babies: Person[] = [];
+  for (let i = 0; i < peopleLength; i++) {
+    const p = state.people[i];
+    if (p.gender == 'female') {
+      const withinChildbearingAge = p.age > 14 && p.age < 50;
+
+      const percentageChanceToMakeBaby = 30;
+
+      if (withinChildbearingAge && p.partner) {
+        // const partner = state.people.find(x => x.id == p.partner);
+        // if (partner?.gender == 'male' && !partner.dead && partner?.age >= 14) {
+        const rand = getRandomNumber(0, 100);
+        if (rand <= percentageChanceToMakeBaby) {
+          // make a baby
+          const gender: 'male' | 'female' = getRandomNumber(0, 100) >= 50 ? 'male' : 'female';
+          const name = gender == 'male' ? getRandomBoyName() : getRandomGirlName()
+          babies.push({
+            id: state.people.length + babies.length + 1,
+            name,
+            age: 0,
+            gender,
+            children: [],
+            mother: p.id,
+            father: p.partner.id
+          });
+        }
+        // }
+      }
+    }
+  }
+  state.people.push(...babies);
+}
+
+function next(state: GameState, skipRender = false) {
+  state.year++;
+  state.news = [];
+  const now = performance.now();
+  state.people
+    .forEach(p => {
+      p.age++;
+      state.food--;
+    });
+  const afterLoopingPeople = performance.now();
+  if (Debug) {
+    console.log(`Aging people: ${afterLoopingPeople - now} ms`);
+  }
+
+  doPartnerMatching(state);
+  const afterPartnerMatching = performance.now();
+  if (Debug) {
+    console.log(`Partner matching: ${afterPartnerMatching - afterLoopingPeople}ms`);
+  }
+  makeBabies(state);
+  const afterBabies = performance.now();
+  if (Debug) {
+    console.log(`Making babies: ${afterBabies - afterPartnerMatching}ms`);
+  }
+  const deceased: Person[] = doDeath(state);
   if (deceased.length) {
     state.news.push({
       title: 'Deaths',
       body: `${deceased.map(p => `${p.name}, aged ${p.age}`)}`
     });
-    deceased.forEach(dp => {
-      state.people = state.people.filter(x => x.id !== dp.id);
-    });
+    // deceased.forEach(dp => {
+    //   state.people = state.people.filter(x => x.id !== dp.id);
+    // });
+    state.people = state.people.filter(p => !p.dead);
+  }
+  const afterDeath = performance.now();
+  if (Debug) {
+    console.log(`death: ${afterDeath - afterBabies}ms`);
+  }
+  if (!skipRender) {
+    renderApp();
+  }
+}
+
+function bulkYearsNext(years: number) {
+  for (let i = 0; i < years; i++) {
+    next(State, true);
   }
   renderApp();
 }
 
 function renderNextButton(parent: HTMLDivElement) {
-  const el: HTMLButtonElement = document.createElement('button');
-  el.innerHTML = 'Next';
-  el.addEventListener('click', () => next(gameState))
-  parent.appendChild(el);
+  const container = document.createElement('div');
+  const yearsToSkip = 25;
+
+  const nextButton: HTMLButtonElement = document.createElement('button');
+  nextButton.innerHTML = 'Next';
+  container.addEventListener('click', () => next(State))
+  container.appendChild(nextButton);
+
+  const secondButton: HTMLButtonElement = document.createElement('button');
+  secondButton.innerHTML = `Next ${yearsToSkip} years`;
+  secondButton.addEventListener('click', () => bulkYearsNext(yearsToSkip));
+  container.appendChild(secondButton);
+
+  parent.appendChild(container);
 }
 
 function logGameState(parent: HTMLDivElement) {
   const el: HTMLDivElement = document.createElement('div');
-  const news = gameState.news.length ? `
+  const news = State.news.length ? `
   <h3>News</h3>
-  ${gameState.news.map(n => `<div><h5>${n.title}</h5><p>${n.body}</p></div>`)}
+  ${State.news.map(n => `<div><h5>${n.title}</h5><p>${n.body}</p></div>`)}
   ` : ``;
+//  ${State.people.map(p => {
+//     return `<div>${p.name} ${p.gender}, ${p.age}</div>`
+//   }).join('')}
 
+// ${news}
   const template = `
-  <h1>Year ${gameState.year}</h1>
-  <h3>People</h3>
-  ${gameState.people.map(p => {
-    return `<div>${p.name} ${p.gender}, ${p.age}</div>`
-  }).join('')}
-  <p>Food reserves: ${gameState.food}</p>
-  ${news}
-  `;
+  <h1>Year ${State.year}</h1>
+  <h3>People (${State.people.length})</h3>
+   <p>Food reserves: ${State.food}</p>
+
+    `;
   el.innerHTML = template;
   parent.appendChild(el);
 }
@@ -161,9 +223,14 @@ function logGameState(parent: HTMLDivElement) {
 const app = document.querySelector<HTMLDivElement>('#app')!
 
 function renderApp() {
+  const now = performance.now();
   app.innerHTML = '';
   renderNextButton(app);
   logGameState(app);
+  const after = performance.now();
+  if (Debug) {
+    console.log(`render: ${after - now}ms`);
+  }
 }
 
 renderApp();
