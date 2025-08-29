@@ -9,7 +9,48 @@ import { GameState, Person } from './types';
 // jobs
 // childcare
 // what needs does the island have e.g. childcare, food variation
-let Debug = true;
+interface Entity<T> {
+  data?: T;
+  active: boolean;
+};
+
+class EntityPool<T> {
+  entities: Entity<T>[] = [];
+  limit: number = 10;
+  currentIndex: number = 0;
+  constructor(amount = 10) {
+    this.limit = amount;
+    for (let i = 0; i < amount; i++) {
+      this.entities.push({ active: false });
+    }
+  }
+  pushEntity(data: T): number {
+    let indexOfSetEntity = -1;
+    if (this.currentIndex - 1 > this.limit) {
+      for (let i = 0; i < this.limit; i++) {
+        if (!this.entities[i].active) {
+          this.entities[i].active = true;
+          this.entities[i].data = data;
+          indexOfSetEntity = i;
+          break;
+        }
+      }
+    } else {
+      const ent = this.entities[this.currentIndex];
+      if (!ent.active) {
+        ent.active = true;
+        ent.data = data;
+        indexOfSetEntity = this.currentIndex;
+        this.currentIndex += 1;
+      }
+    }
+    return indexOfSetEntity;
+  }
+
+}
+const pool = new EntityPool<Person>(1_000_000);
+
+let Debug = false;
 const girlNamesLength = girlNames.names.length;
 const boyNamesLength = boyNames.names.length;
 function getRandomNumber(from: number, to: number) {
@@ -53,9 +94,8 @@ State.people[1].partner = State.people[0];
 
 
 function doPartnerMatching(state: GameState) {
-  const partnerFindingChancePercentage = 40;
-  const partnerFindingAgeMinimum = 14;
-  const acceptablePartnerAgeGap = 30;
+  const partnerFindingChancePercentage = 20;
+  const partnerFindingAgeMinimum = 16;
 
   const males = state.people.filter(p => p.gender == 'male' && !p.partner && p.age >= partnerFindingAgeMinimum);
   const females = state.people.filter(p => p.gender == 'female' && !p.partner && p.age >= partnerFindingAgeMinimum);
@@ -76,8 +116,8 @@ function doPartnerMatching(state: GameState) {
   }
 }
 
-function doDeath(state: GameState): Person[] {
-  const result: Person[] = [];
+function theScytheIsRemorseless(state: GameState): Person[] {
+  const bringOutYerDead: Person[] = [];
   for (let i = 0; i < state.people.length; i++) {
     const p = state.people[i];
     if (p.age < 14) {
@@ -86,36 +126,36 @@ function doDeath(state: GameState): Person[] {
     const upperLimit = p.age < 120 ? 200 : 130;
     const died = getRandomNumber(0, upperLimit - p.age) < 1;
     if (died) {
-      p.partner = undefined;
-      result.push(p);
+      if (p.partner) {
+        p.partner.partner = undefined;
+      }
+      bringOutYerDead.push(p);
       p.dead = true;
-      // delete state.people[i];
     }
-
   }
-  return result;
+
+  state.people = state.people.filter(p => !p.dead);
+  return bringOutYerDead;
 }
 
 function makeBabies(state: GameState) {
   const peopleLength = state.people.length;
   const babies: Person[] = [];
+  const percentageChanceToMakeBaby = 30;
   for (let i = 0; i < peopleLength; i++) {
     const p = state.people[i];
     if (p.gender == 'female') {
       const withinChildbearingAge = p.age > 14 && p.age < 50;
-
-      const percentageChanceToMakeBaby = 30;
 
       if (withinChildbearingAge && p.partner) {
         // const partner = state.people.find(x => x.id == p.partner);
         // if (partner?.gender == 'male' && !partner.dead && partner?.age >= 14) {
         const rand = getRandomNumber(0, 100);
         if (rand <= percentageChanceToMakeBaby) {
-          // make a baby
           const gender: 'male' | 'female' = getRandomNumber(0, 100) >= 50 ? 'male' : 'female';
           const name = gender == 'male' ? getRandomBoyName() : getRandomGirlName()
           babies.push({
-            id: state.people.length + babies.length + 1,
+            id: peopleLength + babies.length + 1,
             name,
             age: 0,
             gender,
@@ -131,7 +171,7 @@ function makeBabies(state: GameState) {
   state.people.push(...babies);
 }
 
-function next(state: GameState, skipRender = false) {
+function nextYear(state: GameState, skipRender = false) {
   state.year++;
   state.news = [];
   const now = performance.now();
@@ -141,33 +181,23 @@ function next(state: GameState, skipRender = false) {
       state.food--;
     });
   const afterLoopingPeople = performance.now();
-  if (Debug) {
-    console.log(`Aging people: ${afterLoopingPeople - now} ms`);
-  }
 
   doPartnerMatching(state);
   const afterPartnerMatching = performance.now();
-  if (Debug) {
-    console.log(`Partner matching: ${afterPartnerMatching - afterLoopingPeople}ms`);
-  }
   makeBabies(state);
   const afterBabies = performance.now();
-  if (Debug) {
-    console.log(`Making babies: ${afterBabies - afterPartnerMatching}ms`);
-  }
-  const deceased: Person[] = doDeath(state);
+  const deceased: Person[] = theScytheIsRemorseless(state);
   if (deceased.length) {
     state.news.push({
       title: 'Deaths',
       body: `${deceased.map(p => `${p.name}, aged ${p.age}`)}`
     });
-    // deceased.forEach(dp => {
-    //   state.people = state.people.filter(x => x.id !== dp.id);
-    // });
-    state.people = state.people.filter(p => !p.dead);
   }
   const afterDeath = performance.now();
   if (Debug) {
+    console.log(`Aging people: ${afterLoopingPeople - now} ms`);
+    console.log(`Partner matching: ${afterPartnerMatching - afterLoopingPeople}ms`);
+    console.log(`Making babies: ${afterBabies - afterPartnerMatching}ms`);
     console.log(`death: ${afterDeath - afterBabies}ms`);
   }
   if (!skipRender) {
@@ -177,7 +207,7 @@ function next(state: GameState, skipRender = false) {
 
 function bulkYearsNext(years: number) {
   for (let i = 0; i < years; i++) {
-    next(State, true);
+    nextYear(State, true);
   }
   renderApp();
 }
@@ -188,7 +218,7 @@ function renderNextButton(parent: HTMLDivElement) {
 
   const nextButton: HTMLButtonElement = document.createElement('button');
   nextButton.innerHTML = 'Next';
-  container.addEventListener('click', () => next(State))
+  container.addEventListener('click', () => nextYear(State))
   container.appendChild(nextButton);
 
   const secondButton: HTMLButtonElement = document.createElement('button');
@@ -205,11 +235,11 @@ function logGameState(parent: HTMLDivElement) {
   <h3>News</h3>
   ${State.news.map(n => `<div><h5>${n.title}</h5><p>${n.body}</p></div>`)}
   ` : ``;
-//  ${State.people.map(p => {
-//     return `<div>${p.name} ${p.gender}, ${p.age}</div>`
-//   }).join('')}
+  //  ${State.people.map(p => {
+  //     return `<div>${p.name} ${p.gender}, ${p.age}</div>`
+  //   }).join('')}
 
-// ${news}
+  // ${news}
   const template = `
   <h1>Year ${State.year}</h1>
   <h3>People (${State.people.length})</h3>
@@ -228,9 +258,9 @@ function renderApp() {
   renderNextButton(app);
   logGameState(app);
   const after = performance.now();
-  if (Debug) {
-    console.log(`render: ${after - now}ms`);
-  }
+  // if (Debug) {
+  //   console.log(`render: ${after - now}ms`);
+  // }
 }
 
 renderApp();
